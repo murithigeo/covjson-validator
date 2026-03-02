@@ -100,8 +100,11 @@ def loadStringDocument(url:str)->Dict:
     
     res=requests.get(url)
     res.raise_for_status()
-    if res.headers.get("content-type") != "application/prs.coverage+json":
-        warn(f"Expected content-type header to be 'application/prs.coverage+json' but found {res.headers.get("content-type")}")
+    media_type=res.headers.get("content-type")
+    if media_type == "application/prs.coverage+json":
+        warn("content-type header 'application/prs.coverage+json' has been deprecated in favour of 'application/cov+json")
+    elif media_type != "application/cov+json":
+        warn(f"expected content-type header to be application/cov+json but got {media_type}")
     document=res.json()
     return document
 
