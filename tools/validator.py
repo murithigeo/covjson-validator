@@ -79,7 +79,7 @@ def axis_name_combinations(axis_data:Dict[str,int])->Tuple[List[str],List[int]]:
         permutations_per_length = [list(permutations(groups[l])) for l in sorted_lengths]
         
         # Generate all combinations via Cartesian product
-        for combo in product(*perms_per_length):
+        for combo in product(*permutations_per_length):
             # Flatten names and generate matching shape
             flat_names = [name for sub in combo for name in sub]
             flat_shape = [axis_data[name] for name in flat_names]

@@ -4,7 +4,7 @@ import os
 from jsonschema import ValidationError
 import pytest
 import json
-from tools import validator as v
+from tools.validator import runtime_validator
 
 pytestmark = pytest.mark.schema("/schemas/coveragejson")
 
@@ -26,6 +26,4 @@ def test_all_playground_coverages(validator):
 
             # Validate the JSON
             validator.validate(j)
-            print(fullpath)
-            # TODO Over 400% test perfomance degradation
-            v.runtime_validator(j)
+            runtime_validator(j)
