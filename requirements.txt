@@ -2,3 +2,4 @@ jsonschema
 exhaust
 pytest
 requests
+uritemplate
