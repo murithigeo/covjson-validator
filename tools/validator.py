@@ -6,12 +6,12 @@ import os
 import json
 import jsonschema
 import requests
-from typing import Dict,List
+from typing import Dict,List,Tuple
 from uritemplate import URITemplate
 from urllib.parse import urlparse
 import math
 from itertools import product,permutations
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from warnings import warn
 
 def create_schema_store():
@@ -56,27 +56,46 @@ def custom_validator(schema:object):
     "A  validator function to validate against runtime schemas"
     return jsonschema.Draft202012Validator(schema)
 
-def axis_name_combinations(axisData:Dict[str,int])->List[List[str],List[int]]:
-    "Return all possible combinations of the expected shape and axisNames of the range\n"
-    "This is required for domains where multiple axes have the same lengths and so data can be arranged in multiple valid combinations"
+def axis_name_combinations(axis_data:Dict[str,int])->Tuple[List[str],List[int]]:
+    """
+    Returns a tuple of two lists:
+    1. A list of all unique axis name lists (both with and without singletons).
+    2. A list of all unique shape lists (both with and without singletons).
+    """
     
-    groups=defaultdict(list)
-    for axisName,length in axisData.items():
-        groups[length].append(axisName)
-    sortedLengths=sorted(groups.keys())
-    permutations_per_length=[list(permutations(groups[l])) for l in sortedLengths]
-    
-    axisShape=[]
-    for length in sortedLengths:
-        axisShape.extend([length]*len(groups[length]))
+    unique_names_set = set()
+    unique_shapes_set = set()
+
+    # Process both scenarios: [IgnoreSingletons=False, IgnoreSingletons=True]
+    for ignore_singletons in [False, True]:
+        groups = defaultdict(list)
+        for name, length in axis_data.items():
+            if ignore_singletons and length == 1:
+                continue
+            groups[length].append(name)
+
+        # Sort lengths to maintain a predictable base order
+        sorted_lengths = sorted(groups.keys())
+        permutations_per_length = [list(permutations(groups[l])) for l in sorted_lengths]
         
-    axisNames=[]
-    for combo in product(*permutations_per_length):
-        axisNames.append([name for sub in combo for name in sub])
-    return [axisNames,axisShape]       
+        # Generate all combinations via Cartesian product
+        for combo in product(*perms_per_length):
+            # Flatten names and generate matching shape
+            flat_names = [name for sub in combo for name in sub]
+            flat_shape = [axis_data[name] for name in flat_names]
+            
+            # Add to sets as tuples (since lists are not hashable)
+            unique_names_set.add(tuple(flat_names))
+            unique_shapes_set.add(tuple(flat_shape))
+
+    # Convert back to List[List[...]] format
+    axisNames = [list(n) for n in unique_names_set]
+    axisShape = [list(s) for s in unique_shapes_set]
+
+    return axisNames,axisShape
 
 def loadStringDocument(url:str)->Dict:
-    "Loads a URL CoverageJSON Document and validates the request and the json document"
+    "Loads a URL CoverageJSON Document"
     custom_validator({"type":"string","format":"uri"}).validate(url)
     
     res=requests.get(url)
@@ -84,14 +103,19 @@ def loadStringDocument(url:str)->Dict:
     if res.headers.get("content-type") != "application/prs.coverage+json":
         warn(f"Expected content-type header to be 'application/prs.coverage+json' but found {res.headers.get("content-type")}")
     document=res.json()
-    validator.validate(document)
     return document
 
-def validate_range(ndarr,axisNames:List[List[str]]=None,axisShape:List[int]=None,catEncodingValues:List[int]=None)->None:
+def validate_range(ndarr,axisNames:List[List[str]]=None,
+                   axisShape:List[List[int]]=None,
+                   catEncodingValues:List[int]=None,
+                   dataType:str=None
+                   )->None:
     if type(ndarr) is str:
         ndarr=loadStringDocument(ndarr)
+        validator.validate(ndarr)
+        
     if axisNames:
-        if ndarr["axisNames"]:
+        if "axisNames" in ndarr:
             custom_validator({
                     "title":"Member 'axisNames' should match the provided arguments",
                     "description": "Given a Domain, then the value of member 'axisNames' should match that of the Domain axes",
@@ -99,18 +123,21 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,axisShape:List[int]=None
                     "oneOf":list(map(lambda x:{"const":x},axisNames))
                     }).validate(ndarr["axisNames"])
     if axisShape:
-        if ndarr["shape"]:
+        if "shape" in ndarr:
             custom_validator({
                 "title":"Member 'shape' should match the provided argument",
                 "description":"Given the shape of the Domain, the value of member 'shape' should match the provided argument",
-                "const":axisShape}).validate(ndarr["shape"])
+                "type":"array",
+                "oneOf":list(map(lambda x:{"const":x},axisShape))}).validate(ndarr["shape"])
+
     if ndarr["type"]=="NdArray":
-        if ndarr["shape"]:
+        if "shape" in ndarr:
             custom_validator({
                     "title":"Product of 'shape' member should equal length of values array",
                     "description":"Inequivalence of these values indicates missing data",
                     "const":math.prod(ndarr["shape"])
                     }).validate(len(ndarr["values"]))
+        # TODO expect only one value
         if catEncodingValues:
             custom_validator({
                     "type":"array",
@@ -118,7 +145,13 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,axisShape:List[int]=None
                         "type":"integer",
                         "enum":catEncodingValues
                     }
-                }).validate(ndarr["values"])
+                }).validate(list(filter(lambda x:x is not None,ndarr["values"])))
+        if dataType:
+            custom_validator({
+                "title":"DataType of range",
+                "description":"If part of a TiledNdArray, then the dataType of resolved range must be the same as that of parent object",
+                "const":dataType
+            }).validate(ndarr["dataType"])
     else:
         for _,tileSet in enumerate(ndarr["tileSets"]):
             urlTemplate=URITemplate(tileSet["urlTemplate"])
@@ -136,7 +169,7 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,axisShape:List[int]=None
             for _,indices in enumerate(cartesianProd):
                 values=dict(zip(tiled_axes, indices))
                 url=urlTemplate.expand(values)
-                validate_range(loadStringDocument(url),axisNames,None,catEncodingValues)
+                validate_range(loadStringDocument(url),axisNames,None,catEncodingValues,ndarr["dataType"])
                 
 def validate_parameter(param)->List[int]|None:
     "Validates the categoryEncoding member"
@@ -144,7 +177,7 @@ def validate_parameter(param)->List[int]|None:
     if not "categoryEncoding" in param: 
         return None
     
-    if not param["observedProperty"]["category"]:
+    if not "categories" in  param["observedProperty"]:
         raise jsonschema.ValidationError("observedProperty must have member 'categories' if member 'categoryEncoding' given ")
     custom_validator({
         "title":"Each CategoryEncoding must have a Category object",
@@ -152,13 +185,13 @@ def validate_parameter(param)->List[int]|None:
         "type":"array",
         "items":{
             "type":"string",
-            "enum":list(map(lambda x: x["id"],parameter["observedProperty"]["categories"]))
+            "enum":list(map(lambda x: x["id"],param["observedProperty"]["categories"]))
                 }
-        }).validate(list(parameter["categoryEncoding"].keys()))
+        }).validate(list(param["categoryEncoding"].keys()))
     catEncodingValues=[]
-    for i in parameter["categoryEncoding"]:
-        catEncoding=parameter["categoryEncoding"][i]
-        if isinstance(cat,list):
+    for i in param["categoryEncoding"]:
+        catEncoding=param["categoryEncoding"][i]
+        if isinstance(catEncoding,list):
             catEncodingValues+=catEncoding
         else:
             catEncodingValues.append(catEncoding)
@@ -174,8 +207,13 @@ def validate_parameter(param)->List[int]|None:
     
     return catEncodingValues
    
-def parse_domain(dom)->[List[List[str]],List[int]]:
+def validate_domain(dom,domainType:str=None)->[List[List[str]],List[int]]:
     "Generate expected axisNames and axis shape values"
+    
+    if domainType:
+        dom["domainType"]=domainType
+    validator.validate(dom)
+    
     axisNamesAndLengths={}
     for axisName in dom["axes"]:
         axis=dom["axes"][axisName]
@@ -199,15 +237,26 @@ def parse_domain(dom)->[List[List[str]],List[int]]:
                     "const":True
                 }).validate(valid)
         axisNamesAndLengths[axisName]=len(axis["values"])
-    return axis_name_combinations(axisNamesAndLengths)
+        axisData=axis_name_combinations(axisNamesAndLengths)
+    return axisData
 
-def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None):
+def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None,domainType:str=None,referencing:Dict=None):
     if type(cov["domain"]) is str:
         cov["domain"]=loadStringDocument(cov["domain"])
-    
+    if referencing and "referencing" not in cov["domain"]:
+        cov["domain"]["referencing"]=referencing
+
+    if domainType and 'domainType' in cov:
+        custom_validator({
+            "title":"CoverageCollection and Coverage 'domainType' members",
+            "description":"The value of the 'domainType' member in the CoverageCollection and Coverage",
+            "const":domainType
+        }).validate(cov["domainType"])
+            
     if catEncodings is None:
         catEncodings={}
-    if cov["parameters"]:
+        
+    if "parameters" in cov:
         for i in cov["parameters"]:
             catEncodings[i]=validate_parameter(cov["parameters"][i])
             
@@ -220,18 +269,18 @@ def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None):
             "enum":list(catEncodings.keys())
         }}).validate(list(cov["ranges"].keys()))
     
-    [axisNames,axisShape]=parse_domain(cov["domain"])
+    axisNames,axisShape=validate_domain(cov["domain"],domainType)
     for i in cov["ranges"]:
-        validate_range(cov["ranges"][i],axisNames,axisShape,catEncodingValues=catEncodings[i])
+        validate_range(cov["ranges"][i],axisNames,axisShape,catEncodings[i])
     
 
 def validate_coverage_collection(covcoll):
     catEncodings={}
-    if obj["parameters"]:
-        for i in obj["parameters"]:
-            catEncodings[i]=validate_parameter(obj)
-    for i in obj["coverages"]:
-        validate_coverage(obj["coverages"][i],catEncodings)
+    if covcoll["parameters"]:
+        for i in covcoll["parameters"]:
+            catEncodings[i]=validate_parameter(covcoll["parameters"][i])
+    for cov in covcoll["coverages"]:
+        validate_coverage(cov,catEncodings,covcoll["domainType"],referencing=covcoll["referencing"] if covcoll["referencing"] is not None else None)
   
 def is_url(ref:str)->bool:
     "Simple utility to determine if string is an absolute uri"
@@ -241,6 +290,21 @@ def is_url(ref:str)->bool:
     if result.scheme == "file":
         return False
     return True
+
+def runtime_validator(obj):
+    match obj["type"]:
+        case "NdArray":
+            validate_range(obj)
+        case "TiledNdArray":
+            validate_range(obj)
+        case "Coverage":
+            validate_coverage(obj)
+        case "CoverageCollection":
+            validate_coverage_collection(obj)
+        case "Domain":
+            validate_domain(obj)
+        case _:
+            raise ValueError("Not a CoverageJSON document")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -259,16 +323,5 @@ if __name__ == "__main__":
             obj = json.load(f)
 
     validator.validate(obj)
-    
-    
-    # Do custom validation
-    match obj["type"]:
-        case "NdArray":
-            validate_range(obj)
-        case "TiledNdArray":
-            validate_range(obj)
-        case "Coverage":
-            validate_coverage(obj)
-        case "CoverageCollection":
-            validate_coverage_collection(obj)
+    runtime_validator(obj)
     print("Valid!")
