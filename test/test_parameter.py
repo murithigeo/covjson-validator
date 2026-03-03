@@ -5,7 +5,7 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
-
+from tools.validator import validate_parameter
 pytestmark = pytest.mark.schema("/schemas/parameter")
 
 
@@ -171,3 +171,62 @@ def test_nonunique_category_encoding(validator):
     }
     with pytest.raises(ValidationError):
         validator.validate(param)
+
+def test_nonunique_category_encoding_values():
+    ''' Invalid: all integers specified by the categoryEncoding must be unique '''
+    param = {
+        "type" : "Parameter",
+        "observedProperty" : {
+            "label" : { "en" : "Land Cover" },
+            "categories": [{
+                "id": "http://example.com/land_cover/categories/grass",
+                "label": { "en" : "Grass" },
+            }, {
+                "id": "http://example.com/land_cover/categories/forest",
+                "label": { "en" : "Forest" }
+            }]
+        },
+        "categoryEncoding": {
+            "http://example.com/land_cover/categories/grass": 1,
+            "http://example.com/land_cover/categories/forest": [1,2]
+        }
+    }
+    
+    with pytest.raises(ValidationError):
+        validate_parameter(param)
+        
+def test_category_encoding_without_category_object():
+    ''' Invalid: All categoryEncoding keys must have an associated category object in observedProperty '''
+    param = {
+        "type" : "Parameter",
+        "observedProperty" : {
+            "label" : { "en" : "Land Cover" },
+            "categories": [{
+                "id": "http://example.com/land_cover/categories/grass",
+                "label": { "en" : "Grass" },
+            }]
+        },
+        "categoryEncoding": {
+            "http://example.com/land_cover/categories/grass": 1,
+            "http://example.com/land_cover/categories/forest": [1,2]
+        }
+    }
+    
+    with pytest.raises(ValidationError):
+        validate_parameter(param)
+
+def test_category_encoding_without_categories():
+    ''' Invalid: categories must be defined if categoryEncoding is present '''
+    param = {
+        "type" : "Parameter",
+        "observedProperty" : {
+            "label" : { "en" : "Land Cover" },
+        },
+        "categoryEncoding": {
+            "http://example.com/land_cover/categories/grass": 1,
+            "http://example.com/land_cover/categories/forest": [2,3]
+        }
+    }
+    
+    with pytest.raises(ValidationError):
+        validate_parameter(param)

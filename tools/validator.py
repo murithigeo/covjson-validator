@@ -116,7 +116,13 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,
     if type(ndarr) is str:
         ndarr=loadStringDocument(ndarr)
         validator.validate(ndarr)
-        
+    
+    if "shape" in ndarr and "axisNames" in ndarr:
+        custom_validator({
+            "description":"Provided shape and axisNames in ndarray, their lengths should be equivalent",
+            "const":len(ndarr["shape"])
+        }).validate(len(ndarr["axisNames"]))
+       
     if axisNames:
         if "axisNames" in ndarr:
             custom_validator({
@@ -132,7 +138,6 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,
                 "description":"Given the shape of the Domain, the value of member 'shape' should match the provided argument",
                 "type":"array",
                 "oneOf":list(map(lambda x:{"const":x},axisShape))}).validate(ndarr["shape"])
-
     if ndarr["type"]=="NdArray":
         if "shape" in ndarr:
             custom_validator({
@@ -140,7 +145,6 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,
                     "description":"Inequivalence of these values indicates missing data",
                     "const":math.prod(ndarr["shape"])
                     }).validate(len(ndarr["values"]))
-        # TODO expect only one value
         if catEncodingValues:
             custom_validator({
                     "type":"array",
@@ -158,14 +162,31 @@ def validate_range(ndarr,axisNames:List[List[str]]=None,
     else:
         for _,tileSet in enumerate(ndarr["tileSets"]):
             urlTemplate=URITemplate(tileSet["urlTemplate"])
+            
             tileShape=tileSet["tileShape"]
             
+            custom_validator({
+                "title":"tileShape has same length as shape",
+                "const":len(ndarr["shape"]) 
+            }).validate(len(tileShape))
             dimensions=[d for d in tileShape if d is not None]
             # Build a list for tiled axis
             tiled_axes=[
                 name for name, shape_val in zip(ndarr["axisNames"],tileShape)
                 if shape_val is not None
             ]
+            
+            # Simple validation of the urlTemplate
+            custom_validator({
+                "title":"urlTemplate variables validation",
+                "description":"urlTemplate variables only includes tiled axisNames",
+                "type":"array",
+                "items":{
+                    "enum":tiled_axes
+                }
+            }).validate(list(urlTemplate.variable_names))
+            
+            
             # Create a cartesian product of available indices and for each, fetch the ndArray            
             cartesianProd=list(product(*[range(d) for d in dimensions]))
 
@@ -191,25 +212,38 @@ def validate_parameter(param)->List[int]|None:
             "enum":list(map(lambda x: x["id"],param["observedProperty"]["categories"]))
                 }
         }).validate(list(param["categoryEncoding"].keys()))
+    
     catEncodingValues=[]
     for i in param["categoryEncoding"]:
         catEncoding=param["categoryEncoding"][i]
         if isinstance(catEncoding,list):
-            catEncodingValues+=catEncoding
+            catEncodingValues.extend(catEncoding)
         else:
             catEncodingValues.append(catEncoding)
+            
     custom_validator({
         "title":"Uniqueness of categoryEncoding integers",
         "description":"Given a categoryEncoding, then all described values must be unique",
         "type":"array",
+        "uniqueItems":True,
         "items":{
-            "type":"integer",
-            "uniqueItems":True
+            "type":"integer"
         }
     }).validate(catEncodingValues)
-    
     return catEncodingValues
-   
+
+def validate_parameter_group(p_group:Dict,paramKeys:List[str]):
+    "Validate parameterGroup members"
+    custom_validator({
+        "title":"ParameterGroup validation",
+        "description":"Given a ParameterGroup object, the values of the 'members' key must be existing parameters keys",
+        "type":"array",
+        "items":{
+            "type":"string",
+            "enum":paramKeys
+        }
+    }).validate(p_group["members"])
+    
 def validate_domain(dom,domainType:str=None)->[List[List[str]],List[int]]:
     "Generate expected axisNames and axis shape values"
     
@@ -246,9 +280,18 @@ def validate_domain(dom,domainType:str=None)->[List[List[str]],List[int]]:
 def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None,domainType:str=None,referencing:Dict=None):
     if type(cov["domain"]) is str:
         cov["domain"]=loadStringDocument(cov["domain"])
-    if referencing and "referencing" not in cov["domain"]:
-        cov["domain"]["referencing"]=referencing
-
+        
+    if catEncodings is None:
+        catEncodings={}
+        
+    if "parameters" in cov:
+        for i in cov["parameters"]:
+            catEncodings[i]=validate_parameter(cov["parameters"][i])
+    
+    if "parameterGroups" in cov:
+        for p_group in cov["parameterGroups"]:
+            validate_parameter_group(p_group,list(catEncodings.keys()))
+    
     if domainType and 'domainType' in cov:
         custom_validator({
             "title":"CoverageCollection and Coverage 'domainType' members",
@@ -256,13 +299,10 @@ def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None,domainType:str=N
             "const":domainType
         }).validate(cov["domainType"])
             
-    if catEncodings is None:
-        catEncodings={}
+    
+    if referencing and "referencing" not in cov["domain"]:
+        cov["domain"]["referencing"]=referencing
         
-    if "parameters" in cov:
-        for i in cov["parameters"]:
-            catEncodings[i]=validate_parameter(cov["parameters"][i])
-            
     custom_validator({
         "title":"Each range is described by a Parameter object",
         "description":"Each range value should have an associated parameter in the Coverage or CoverageCollection",
@@ -279,9 +319,14 @@ def validate_coverage(cov,catEncodings:Dict[str,List[int]]=None,domainType:str=N
 
 def validate_coverage_collection(covcoll):
     catEncodings={}
-    if covcoll["parameters"]:
+    if "parameters" in covcoll:
         for i in covcoll["parameters"]:
             catEncodings[i]=validate_parameter(covcoll["parameters"][i])
+            
+    if "parameterGroups" in covcoll:
+        for p_group in covcoll["parameterGroups"]:
+            validate_parameter_group(p_group,list(catEncodings.keys()))
+            
     for cov in covcoll["coverages"]:
         validate_coverage(cov,catEncodings,covcoll["domainType"],referencing=covcoll["referencing"] if covcoll["referencing"] is not None else None)
   
@@ -295,6 +340,7 @@ def is_url(ref:str)->bool:
     return True
 
 def runtime_validator(obj):
+    validator.validate(obj)
     match obj["type"]:
         case "NdArray":
             validate_range(obj)
@@ -306,8 +352,6 @@ def runtime_validator(obj):
             validate_coverage_collection(obj)
         case "Domain":
             validate_domain(obj)
-        case _:
-            raise ValueError("Not a CoverageJSON document")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -325,6 +369,5 @@ if __name__ == "__main__":
         with open(args.covjson_path, encoding="utf-8") as f:
             obj = json.load(f)
 
-    validator.validate(obj)
     runtime_validator(obj)
     print("Valid!")

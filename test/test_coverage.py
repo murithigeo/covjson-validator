@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
+from tools.validator import validate_coverage
 
 pytestmark = pytest.mark.schema("/schemas/coverage")
 
@@ -209,3 +210,14 @@ def test_incorrect_alternate_ranges(validator):
 # TODO test that "shape" of (Tiled)NdArray "ranges" matches "axes" of "domain"
 # TODO test that "values" of (Tiled)NdArray "ranges" matches the parameter's
 #      "categoryEncoding", if existing
+
+
+def test_ranges_reference_existing_param():
+    ''' Invalid: All ranges in parameters reference existing parameter '''
+
+    cov=get_sample_coverage()
+    cov["ranges"]["UnlistedParam"]="http://example.com/data.covjson"
+    cov["ranges"]["YetAnotherUnlistedParam"]="http://example.com/data1.covjson"
+    
+    with pytest.raises(ValidationError):
+        validate_coverage(cov)

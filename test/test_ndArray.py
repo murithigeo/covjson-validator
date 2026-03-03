@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
+from tools.validator import validate_range
 
 pytestmark = pytest.mark.schema("/schemas/ndArray")
 
@@ -168,3 +169,26 @@ def test_non_0d_with_missing_shape_and_axis_names(validator):
 # TODO test that "values" has the same length as mul("shape")
 # NOTE: the spec doesn't specify this currently, which is a bug
 # TODO test that "shape" and "axisNames" have the same length if non-empty
+
+def test_valid_ndarray():
+    ''' Valid: Sanity check for ndarray '''
+    ndarray=get_example_ndarray()
+    validate_range(ndarray)
+
+def test_values_shape_length():
+    ''' Invalid: values has same length as product(shape) '''
+    ndarray=get_example_ndarray()
+    ndarray["shape"]=[4,2,1]
+    
+    with pytest.raises(ValidationError):
+        validate_range(ndarray)
+
+def test_shape_axisNames_length():
+    ''' Invalid: If non-empty, shape and axisNames have same length '''
+
+    # TODO There are several validations that can raise an Exception before even checking for this
+    ndarray=get_example_ndarray()
+    ndarray["axisNames"]=["x","y","t"]
+    
+    with pytest.raises(ValidationError):
+        validate_range(ndarray)

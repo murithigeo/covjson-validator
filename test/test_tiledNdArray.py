@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
+from tools.validator import validate_range
 
 pytestmark = pytest.mark.schema("/schemas/tiledNdArray")
 
@@ -9,18 +10,18 @@ pytestmark = pytest.mark.schema("/schemas/tiledNdArray")
 def get_example_tiled_ndarray():
     return {
         "type" : "TiledNdArray",
-        "dataType": "float",
+        "dataType": "integer",
         "axisNames": ["t", "y", "x"],
         "shape": [2, 5, 10],
         "tileSets": [{
             "tileShape": [None, None, None],
-            "urlTemplate": "http://example.com/a/all.covjson"
+            "urlTemplate": "https://covjson.org/playground/coverages/grid-tiled/c/all.covjson"
         }, {
             "tileShape": [1, None, None],
-            "urlTemplate": "http://example.com/b/{t}.covjson"
+            "urlTemplate": "https://covjson.org/playground/coverages/grid-tiled/b/{t}.covjson"
         }, {
             "tileShape": [None, 2, 3],
-            "urlTemplate": "http://example.com/c/{y}-{x}.covjson"
+            "urlTemplate": "https://covjson.org/playground/coverages/grid-tiled/a/{y}-{x}.covjson"
         }]
     }
 
@@ -211,7 +212,35 @@ def test_incorrect_url_template_type(validator):
         validator.validate(tiled_ndarray)
 
 
-# TODO test that "shape" and "axisNames" have the same length
-# TODO test that "tileShape" has the same length as "shape"
 # TODO test that "urlTemplate" is a valid RFC 6570 Level 1 URI template
-# TODO test that "urlTemplate" contains the right '{}' variables
+
+def test_axisnames_shape_length_valid():
+    ''' Valid: shape and axisNames have same length '''
+    tiled_ndarray=get_example_tiled_ndarray()
+    validate_range(tiled_ndarray)
+    
+def test_axisnames_shape_length():
+    ''' Invalid: shape and axisNames have the same length '''
+    tiled_ndarray=get_example_tiled_ndarray()
+    tiled_ndarray["axisNames"]=tiled_ndarray["axisNames"][0:len(tiled_ndarray["axisNames"])-2]
+    
+    with pytest.raises(ValidationError):
+        validate_range(tiled_ndarray)
+
+def tile_shape_shape_length():
+    ''' Invalid: tileShape and shape have same length '''
+    
+    tiled_ndarray=get_example_tiled_ndarray()
+    tiled_ndarray["shape"]=tiled_ndarray["shape"][0:len(tiled_ndarray["shape"])-2]
+    
+    with pytest.raises(ValidationError):
+        validate_range(tiled_ndarray)
+        
+def urltemplate_contains_right_variables():
+    ''' Invalid: Validate that each urlTemplate only contains axisName variables '''
+    
+    tiled_ndarray=get_example_tiled_ndarray()
+    tiled_ndarray["tileSets"]=[{"urlTemplate":"https://covjson.org/playground/coverages/grid-tiled/c/{x}/all.covjson"}]
+    
+    with pytest.raises(ValidationError):
+        validate_range(tiled_ndarray)
