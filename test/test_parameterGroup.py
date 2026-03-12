@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
+from tools.validator import validate_parameter_group
 
 pytestmark = pytest.mark.schema("/schemas/parameterGroup")
 
@@ -125,3 +126,11 @@ def test_members_with_incorrect_item_type(validator):
 
 # TODO the spec says observedProperty is the same as for Parameter
 #      but it wouldn't make sense to have "categories" in there
+
+
+def test_members_includes_invalid():
+    "Invalid: parameterGroup with 'members' including non-valid parameter keys"
+    group=get_example_parameter_group()
+    group["members"].append(["YARN"])
+    with pytest.raises(ValidationError):
+        validate_parameter_group(group,["SST_mean", "SST_stddev"])

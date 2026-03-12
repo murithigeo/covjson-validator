@@ -2,6 +2,8 @@
 
 import pytest
 from jsonschema.exceptions import ValidationError
+from tools.validator import validate_coverage_collection
+from .test_coverage import get_sample_coverage
 
 pytestmark = pytest.mark.schema("/schemas/coverageCollection")
 
@@ -232,4 +234,24 @@ def test_incorrect_referencing_type(validator):
         validator.validate(collection)
 
 
-# TODO test that all coverage ranges reference a parameter in scope
+def test_with_defined_domainType():
+    ''' Invalid: Collection with predefined domainType throws on other domainTypes '''
+    collection=get_sample_coverage_collection()
+    cov=get_sample_coverage()
+    
+    collection["coverages"].append(cov)
+    with pytest.raises(ValidationError):
+        validate_coverage_collection(collection)
+
+def test_ranges_reference_existing_param():
+    ''' Invalid: All ranges in parameters reference existing parameter '''
+    collection=get_sample_coverage_collection()
+    cov=get_sample_coverage()
+    cov["ranges"]["UnlistedParam"]="http://example.com/data.covjson"
+    collection["coverages"].append(cov)
+    with pytest.raises(ValidationError):
+        validate_coverage_collection(collection)
+
+def test_collection():
+    collection=get_sample_coverage_collection()
+    validate_coverage_collection(collection)

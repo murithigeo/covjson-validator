@@ -7,6 +7,7 @@ from .test_ndArray import get_example_ndarray
 from .test_tiledNdArray import get_example_tiled_ndarray
 from .test_coverage import get_sample_coverage
 from .test_coverageCollection import get_sample_coverage_collection
+from tools.validator import runtime_validator
 
 pytestmark = pytest.mark.schema("/schemas/coveragejson")
 
@@ -65,3 +66,31 @@ def test_misspelled_type(validator, get_domain):
     domain["type"] = "Doman"
     with pytest.raises(ValidationError):
         validator.validate(domain)
+
+def test_ndarray():
+    ''' Valid: NdArray is valid according to custom validator '''
+    ndarray=get_example_ndarray()
+    runtime_validator(ndarray)
+    
+def test_tiledNdArray():
+    ''' Valid: TiledNdArray is valid according to custom validator '''
+    tiled_ndarray=get_example_tiled_ndarray()
+    runtime_validator(tiled_ndarray)
+
+def test_coverage():
+    ''' Valid: Coverage is valid according to custom validator '''
+    coverage=get_sample_coverage()
+    runtime_validator(coverage)
+
+def test_coverageCollection():
+    ''' Valid: CoverageCollection is valid according to custom validator '''
+    collection=get_sample_coverage_collection()
+    runtime_validator(collection)
+    
+def test_invalid_document():
+    ''' Invalid: Document is not valid CoverageJSON '''
+    coverage=get_sample_coverage()
+    coverage["type"]="NotACoverage"
+    
+    with pytest.raises(ValidationError):
+        runtime_validator(coverage)

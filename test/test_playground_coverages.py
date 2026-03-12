@@ -4,12 +4,14 @@ import os
 from jsonschema import ValidationError
 import pytest
 import json
+from tools.validator import runtime_validator
 
 pytestmark = pytest.mark.schema("/schemas/coveragejson")
 
-def test_all_playground_coverages(validator):
-
-    # Recursively traverse the test_data/playground directory
+def load_all_coverages():
+    coverages=dict()
+    
+   # Recursively traverse the test_data/playground directory
     rootpath = os.path.join(os.path.dirname(__file__), "test_data", "playground")
     for subdir, dirs, files in os.walk(rootpath):
 
@@ -22,6 +24,15 @@ def test_all_playground_coverages(validator):
             # Load the JSON
             with open(fullpath) as f:
                 j = json.load(f)
+                coverages[file.split(".covjson")[0]]=j
+    return coverages
 
-            # Validate the JSON
-            validator.validate(j)
+coverages=load_all_coverages()
+              
+def test_all_playground_coverages(validator):
+    for id in coverages:
+        validator.validate(coverages[id])
+
+def test_using_runtime_validator():
+    for id in coverages:
+        runtime_validator(coverages[id])
